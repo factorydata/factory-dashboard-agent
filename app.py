@@ -9,12 +9,12 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-# Deprecation warnings ও UserWarnings সাপ্রেস করার জন্য
+# Deprecation warnings সাপ্রেস করার জন্য
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # --------------------------------------------------
-# Page Config & Custom Styling
+# Page Config
 # --------------------------------------------------
 st.set_page_config(
     page_title="Factory Dashboard AI Agent", page_icon="🤖", layout="wide"
@@ -112,14 +112,18 @@ folder_mappings = [
 
 def get_folder_id(drive_service, folder_name, parent_id=None):
     query = (
-        f"name = '{folder_name}' and mimeType ="
-        " 'application/vnd.google-apps.folder' and trashed = false"
+        "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
     )
     if parent_id:
         query += f" and '{parent_id}' in parents"
+
     results = drive_service.files().list(q=query, fields="files(id, name)").execute()
     items = results.get("files", [])
-    return items[0]["id"] if items else None
+
+    for item in items:
+        if item["name"].strip().lower() == folder_name.strip().lower():
+            return item["id"]
+    return None
 
 
 # --------------------------------------------------
@@ -138,7 +142,7 @@ st.caption(
 st.markdown("---")
 
 # --------------------------------------------------
-# 4. Action Tabs Navigation (With Fast Sync & AI Assistant)
+# 4. Action Tabs Navigation
 # --------------------------------------------------
 tab_sync, tab_upload, tab_view, tab_chat = st.tabs(
     [
@@ -340,7 +344,7 @@ with tab_view:
 
                 if all_values:
                     df_view = pd.DataFrame(all_values)
-                    st.dataframe(df_view, use_container_width=True)
+                    st.dataframe(df_view, use_container_width="stretch")
                 else:
                     st.info("এই ট্যাবে কোনো ডাটা নেই।")
             except Exception as e:
@@ -397,7 +401,7 @@ with tab_chat:
 
                         st.markdown(msg)
                         if vals:
-                            st.dataframe(pd.DataFrame(vals[:8]), use_container_width=True)
+                            st.dataframe(pd.DataFrame(vals[:8]), use_container_width="stretch")
 
                         st.session_state.messages.append(
                             {"role": "assistant", "content": msg}
@@ -405,15 +409,4 @@ with tab_chat:
                     else:
                         response = f"🔍 **ড্যাশবোর্ড সামারি:**\n\nবর্তমানে আপনার মাস্টার ড্যাশবোর্ডে মোট **{len(sheet_titles)}টি** সক্রিয় শিট/ট্যাব রয়েছে।\n\n**উপলব্ধ ট্যাবসমূহ:**\n`" + "`, `" .join(sheet_titles[:15]) + "`"
                         if len(sheet_titles) > 15:
-                            response += f" এবং আরও {len(sheet_titles) - 15}টি।"
-                        st.markdown(response)
-                        st.session_state.messages.append(
-                            {"role": "assistant", "content": response}
-                        )
-
-                except Exception as e:
-                    err_msg = f"❌ ডাটা বিশ্লেষণে সমস্যা হয়েছে: {e}"
-                    st.markdown(err_msg)
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": err_msg}
-                    )
+                            response += f" এবং আরও {len(
