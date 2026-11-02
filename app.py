@@ -68,17 +68,17 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
+
 @st.cache_resource
 def get_google_services():
-    # Streamlit Secrets থেকে credentials পড়া এবং \n ঠিক করা
     creds_dict = dict(st.secrets["gcp_service_account"])
     if "private_key" in creds_dict:
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-    
+
     creds = service_account.Credentials.from_service_account_info(
         creds_dict, scopes=SCOPES
     )
-    
+
     drive_service = build("drive", "v3", credentials=creds)
     gc = gspread.authorize(creds)
     spreadsheet = gc.open(SHEET_NAME)
@@ -129,7 +129,7 @@ st.caption(
 st.markdown("---")
 
 # --------------------------------------------------
-# 4. Action Tabs (ChatGPT Style Navigation)
+# 4. Action Tabs Navigation
 # --------------------------------------------------
 tab_sync, tab_upload, tab_view = st.tabs(
     ["🔄 Auto Drive Sync", "📤 Manual File Upload", "📊 View Dashboard"]
@@ -217,4 +217,109 @@ with tab_sync:
                                 )
 
                                 df = df.fillna("")
-                                values = [df.columns.astype(str).
+                                values = [df.columns.astype(str).tolist()] + df.astype(
+                                    str
+                                ).values.tolist()
+
+                                try:
+                                    worksheet = spreadsheet.worksheet(target_tab_name)
+                                except gspread.exceptions.WorksheetNotFound:
+                                    worksheet = spreadsheet.add_worksheet(
+                                        title=target_tab_name,
+                                        rows=max(len(values) + 20, 100),
+                                        cols=max(len(values[0]) + 10, 20),
+                                    )
+
+                                worksheet.clear()
+                                worksheet.update(values=values, range_name="A1")
+                                updated_tabs_count += 1
+                                time.sleep(1)  # Quota protection
+
+                            processed_ids.append(fid)
+                            total_files_processed += 1
+
+                        except Exception as err:
+                            st.warning(f"Error processing {fname}: {err}")
+
+                        file_index += 1
+
+                    for pid in processed_ids:
+                        try:
+                            drive_service.files().update(
+                                fileId=pid, body={"trashed": True}
+                            ).execute()
+                        except Exception as clean_err:
+                            st.warning(f"Trashing failed for {pid}: {clean_err}")
+
+                status_text.text("Sync complete!")
+                st.success(
+                    f"✅ **Sync Successful!** Processed {total_files_processed} files"
+                    f" and updated {updated_tabs_count} tabs."
+                )
+
+        except Exception as e:
+            st.error(f"❌ Error during sync: {e}")
+
+# Tab 2: Manual Excel/CSV Upload
+with tab_upload:
+    st.subheader("ম্যানুয়াল এক্সেল/সিএসভি আপলোড")
+    uploaded_file = st.file_uploader(
+        "এক্সেল অথবা সিএসভি ফাইল সিলেক্ট বা ড্র্যাগ করুন",
+        type=["xlsx", "xls", "csv"],
+    )
+    custom_prefix = st.text_input("ট্যাব প্রিফিক্স (Prefix Name)", value="MANUAL")
+
+    if uploaded_file and st.button("📤 Upload & Sync to Sheet"):
+        try:
+            _, spreadsheet = get_google_services()
+            if uploaded_file.name.endswith(".csv"):
+                df = pd.read_csv(uploaded_file)
+                sheets_dict = {"Sheet1": df}
+            else:
+                excel_file = pd.ExcelFile(uploaded_file, engine="openpyxl")
+                sheets_dict = {
+                    sheet: excel_file.parse(sheet) for sheet in excel_file.sheet_names
+                }
+
+            for s_name, df in sheets_dict.items():
+                tab_title = f"{custom_prefix}_{s_name}"
+                df = df.fillna("")
+                values = [df.columns.astype(str).tolist()] + df.astype(
+                    str
+                ).values.tolist()
+
+                try:
+                    worksheet = spreadsheet.worksheet(tab_title)
+                except gspread.exceptions.WorksheetNotFound:
+                    worksheet = spreadsheet.add_worksheet(
+                        title=tab_title,
+                        rows=max(len(values) + 20, 100),
+                        cols=max(len(values[0]) + 10, 20),
+                    )
+
+                worksheet.clear()
+                worksheet.update(values=values, range_name="A1")
+
+            st.success(f"✅ '{uploaded_file.name}' সফলভাবে মাস্টার শিটে আপলোড হয়েছে!")
+        except Exception as e:
+            st.error(f"❌ আপলোডে সমস্যা হয়েছে: {e}")
+
+# Tab 3: Data Viewer
+with tab_view:
+    st.subheader("মাস্টার ড্যাশবোর্ড ডাটা ভিউয়ার")
+    if st.button("🔄 Refresh Tabs List"):
+        try:
+            _, spreadsheet = get_google_services()
+            worksheets = spreadsheet.worksheets()
+            tab_names = [ws.title for ws in worksheets]
+
+            selected_tab = st.selectbox("ড্যাশবোর্ডের ট্যাব সিলেক্ট করুন:", tab_names)
+            if selected_tab:
+                ws = spreadsheet.worksheet(selected_tab)
+                data = ws.get_all_records()
+                if data:
+                    st.dataframe(pd.DataFrame(data), use_container_width=True)
+                else:
+                    st.info("এই ট্যাবে কোনো ডাটা নেই।")
+        except Exception as e:
+            st.error(f"❌ ডাটা লোড করতে সমস্যা: {e}")
