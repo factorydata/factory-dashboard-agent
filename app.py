@@ -138,7 +138,7 @@ st.caption(
 st.markdown("---")
 
 # --------------------------------------------------
-# 4. Action Tabs Navigation (With AI Assistant)
+# 4. Action Tabs Navigation (With Fast Sync & AI Assistant)
 # --------------------------------------------------
 tab_sync, tab_upload, tab_view, tab_chat = st.tabs(
     [
@@ -149,7 +149,7 @@ tab_sync, tab_upload, tab_view, tab_chat = st.tabs(
     ]
 )
 
-# Tab 1: Google Drive Sync
+# Tab 1: Fast Google Drive Sync
 with tab_sync:
     st.subheader("ড্রাইভ ফাইল প্রসেসিং")
     st.write("Google Drive-এর ১২টি ফোল্ডার স্ক্যান করে ড্যাশবোর্ডে সিঙ্ক করুন।")
@@ -247,7 +247,6 @@ with tab_sync:
                                 worksheet.clear()
                                 worksheet.update(values=values, range_name="A1")
                                 updated_tabs_count += 1
-                                time.sleep(1)
 
                             processed_ids.append(fid)
                             total_files_processed += 1
@@ -347,7 +346,7 @@ with tab_view:
             except Exception as e:
                 st.error(f"❌ ডাটা প্রদর্শন করতে সমস্যা: {e}")
 
-# Tab 4: AI Data Assistant Chatbot (Smart Search Upgrade)
+# Tab 4: AI Data Assistant Chatbot
 with tab_chat:
     st.subheader("💬 AI Data Assistant")
     st.caption("আপনার ড্যাশবোর্ড ও মাস্টার গুগল শিটের ডাটা নিয়ে কথা বলুন বা খুঁজুন।")
@@ -356,7 +355,7 @@ with tab_chat:
         st.session_state.messages = [
             {
                 "role": "assistant",
-                "content": "হ্যালো! আমি আপনার ড্যাশবোর্ড AI অ্যাসিস্ট্যান্ট। আপনি কোনো রিপোর্টের নাম (যেমন: DMS, Rejection, WS) বা নির্দিষ্ট ট্যাবের নাম লিখে সার্চ করতে পারেন।",
+                "content": "হ্যালো! আমি আপনার ড্যাশবোর্ড AI অ্যাসিস্ট্যান্ট। আপনি যেকোনো রিপোর্টের নাম (যেমন: DMS, Rejection, WS) বা ট্যাবের নাম লিখে সার্চ করতে পারেন।",
             }
         ]
 
@@ -379,7 +378,6 @@ with tab_chat:
                     raw_words = prompt.lower().strip().split()
                     matched_tabs = []
 
-                    # কিওয়ার্ড দিয়ে ম্যাচ করানো (উদা: 'dms', 'ws', 'rejection')
                     for title in sheet_titles:
                         t_lower = title.lower()
                         for w in raw_words:
