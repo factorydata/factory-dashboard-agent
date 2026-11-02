@@ -220,7 +220,8 @@ with tab_sync:
                                     else f"{item['prefix']}_{file_index}_S{s_idx}"
                                 )
 
-                                df = df.fillna("")
+                                # NaN এবং Float রূপান্তরজনিত ত্রুটি প্রতিরোধে:
+                                df = df.astype(object).fillna("")
                                 values = [df.columns.astype(str).tolist()] + df.astype(
                                     str
                                 ).values.tolist()
@@ -287,7 +288,7 @@ with tab_upload:
 
             for s_name, df in sheets_dict.items():
                 tab_title = f"{custom_prefix}_{s_name}"
-                df = df.fillna("")
+                df = df.astype(object).fillna("")
                 values = [df.columns.astype(str).tolist()] + df.astype(
                     str
                 ).values.tolist()
