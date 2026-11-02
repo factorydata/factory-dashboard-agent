@@ -138,10 +138,15 @@ st.caption(
 st.markdown("---")
 
 # --------------------------------------------------
-# 4. Action Tabs Navigation
+# 4. Action Tabs Navigation (Added AI Assistant Tab)
 # --------------------------------------------------
-tab_sync, tab_upload, tab_view = st.tabs(
-    ["🔄 Auto Drive Sync", "📤 Manual File Upload", "📊 View Dashboard"]
+tab_sync, tab_upload, tab_view, tab_chat = st.tabs(
+    [
+        "🔄 Auto Drive Sync",
+        "📤 Manual File Upload",
+        "📊 View Dashboard",
+        "💬 AI Assistant",
+    ]
 )
 
 # Tab 1: Google Drive Sync
@@ -301,43 +306,4 @@ with tab_upload:
                 try:
                     worksheet = spreadsheet.worksheet(tab_title)
                 except gspread.exceptions.WorksheetNotFound:
-                    worksheet = spreadsheet.add_worksheet(
-                        title=tab_title,
-                        rows=max(len(values) + 20, 100),
-                        cols=max(len(values[0]) + 10, 20),
-                    )
-
-                worksheet.clear()
-                worksheet.update(values=values, range_name="A1")
-
-            st.success(f"✅ '{uploaded_file.name}' সফলভাবে মাস্টার শিটে আপলোড হয়েছে!")
-        except Exception as e:
-            st.error(f"❌ আপলোডে সমস্যা হয়েছে: {e}")
-
-# Tab 3: Data Viewer (Direct Grid View Without Column Conflicts)
-with tab_view:
-    st.subheader("মাস্টার ড্যাশবোর্ড ডাটা ভিউয়ার")
-    if st.button("🔄 Refresh Tabs List"):
-        try:
-            _, spreadsheet = get_google_services()
-            worksheets = spreadsheet.worksheets()
-            st.session_state["tab_names"] = [ws.title for ws in worksheets]
-        except Exception as e:
-            st.error(f"❌ ট্যাব লিস্ট লোড করতে সমস্যা: {e}")
-
-    tab_names = st.session_state.get("tab_names", [])
-    if tab_names:
-        selected_tab = st.selectbox("ড্যাশবোর্ডের ট্যাব সিলেক্ট করুন:", tab_names)
-        if selected_tab:
-            try:
-                _, spreadsheet = get_google_services()
-                ws = spreadsheet.worksheet(selected_tab)
-                all_values = ws.get_all_values()
-
-                if all_values:
-                    df_view = pd.DataFrame(all_values)
-                    st.dataframe(df_view, use_container_width=True)
-                else:
-                    st.info("এই ট্যাবে কোনো ডাটা নেই।")
-            except Exception as e:
-                st.error(f"❌ ডাটা প্রদর্শন করতে সমস্যা: {e}")
+                    worksheet = spreadsheet.add_works
