@@ -148,7 +148,6 @@ if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..
                 {context_data}
                 """
 
-                # Updated Model Name
                 response = ai_client.models.generate_content(
                     model="gemini-3.8-flash",
                     contents=system_prompt,
@@ -161,4 +160,4 @@ if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..
             except Exception as e:
                 err = f"❌ সমস্যা হয়েছে: {e}"
                 st.markdown(err)
-                st.session_state.messages.append({"role": "assistant", "content": err
+                st.session_state.messages.append({"role": "assistant", "content": err})
