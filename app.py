@@ -314,7 +314,7 @@ with tab_upload:
         except Exception as e:
             st.error(f"❌ আপলোডে সমস্যা হয়েছে: {e}")
 
-# Tab 3: Data Viewer (Fixed Duplicate Headers Error)
+# Tab 3: Data Viewer
 with tab_view:
     st.subheader("মাস্টার ড্যাশবোর্ড ডাটা ভিউয়ার")
     if st.button("🔄 Refresh Tabs List"):
@@ -323,3 +323,23 @@ with tab_view:
             worksheets = spreadsheet.worksheets()
             st.session_state["tab_names"] = [ws.title for ws in worksheets]
         except Exception as e:
+            st.error(f"❌ ট্যাব লিস্ট লোড করতে সমস্যা: {e}")
+
+    tab_names = st.session_state.get("tab_names", [])
+    if tab_names:
+        selected_tab = st.selectbox("ড্যাশবোর্ডের ট্যাব সিলেক্ট করুন:", tab_names)
+        if selected_tab:
+            try:
+                _, spreadsheet = get_google_services()
+                ws = spreadsheet.worksheet(selected_tab)
+                all_values = ws.get_all_values()
+
+                if all_values:
+                    header = all_values[0]
+                    rows = all_values[1:]
+                    df_view = pd.DataFrame(rows, columns=header)
+                    st.dataframe(df_view, use_container_width=True)
+                else:
+                    st.info("এই ট্যাবে কোনো ডাটা নেই।")
+            except Exception as e:
+                st.error(f"❌ ডাটা প্রদর্শন করতে সমস্যা: {e}")
