@@ -1,12 +1,17 @@
 import io
 import os
 import time
+import warnings
 import gspread
 import pandas as pd
 import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+
+# Deprecation warnings ও UserWarnings সাপ্রেস করার জন্য
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # --------------------------------------------------
 # Page Config & Custom Styling
@@ -205,7 +210,7 @@ with tab_sync:
                             else:
                                 excel_file = pd.ExcelFile(fstream, engine="openpyxl")
                                 sheets_dict = {
-                                    sheet: excel_file.parse(sheet)
+                                    sheet: pd.read_excel(excel_file, sheet_name=sheet)
                                     for sheet in excel_file.sheet_names
                                 }
 
@@ -247,14 +252,13 @@ with tab_sync:
 
                         file_index += 1
 
-                    # ফাইল ট্র্যাশ করার লজিক (পারমিশন না থাকলে ইগনোর করবে)
                     for pid in processed_ids:
                         try:
                             drive_service.files().update(
                                 fileId=pid, body={"trashed": True}
                             ).execute()
                         except Exception:
-                            pass  # Trashing error ইগনোর করা হলো
+                            pass
 
                 status_text.text("Sync complete!")
                 st.success(
@@ -283,7 +287,8 @@ with tab_upload:
             else:
                 excel_file = pd.ExcelFile(uploaded_file, engine="openpyxl")
                 sheets_dict = {
-                    sheet: excel_file.parse(sheet) for sheet in excel_file.sheet_names
+                    sheet: pd.read_excel(excel_file, sheet_name=sheet)
+                    for sheet in excel_file.sheet_names
                 }
 
             for s_name, df in sheets_dict.items():
