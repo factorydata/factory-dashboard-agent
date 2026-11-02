@@ -138,7 +138,7 @@ st.caption(
 st.markdown("---")
 
 # --------------------------------------------------
-# 4. Action Tabs Navigation (Added AI Assistant Tab)
+# 4. Action Tabs Navigation (With AI Assistant)
 # --------------------------------------------------
 tab_sync, tab_upload, tab_view, tab_chat = st.tabs(
     [
@@ -306,4 +306,107 @@ with tab_upload:
                 try:
                     worksheet = spreadsheet.worksheet(tab_title)
                 except gspread.exceptions.WorksheetNotFound:
-                    worksheet = spreadsheet.add_works
+                    worksheet = spreadsheet.add_worksheet(
+                        title=tab_title,
+                        rows=max(len(values) + 20, 100),
+                        cols=max(len(values[0]) + 10, 20),
+                    )
+
+                worksheet.clear()
+                worksheet.update(values=values, range_name="A1")
+
+            st.success(f"✅ '{uploaded_file.name}' সফলভাবে মাস্টার শিটে আপলোড হয়েছে!")
+        except Exception as e:
+            st.error(f"❌ আপলোডে সমস্যা হয়েছে: {e}")
+
+# Tab 3: Data Viewer
+with tab_view:
+    st.subheader("মাস্টার ড্যাশবোর্ড ডাটা ভিউয়ার")
+    if st.button("🔄 Refresh Tabs List"):
+        try:
+            _, spreadsheet = get_google_services()
+            worksheets = spreadsheet.worksheets()
+            st.session_state["tab_names"] = [ws.title for ws in worksheets]
+        except Exception as e:
+            st.error(f"❌ ট্যাব লিস্ট লোড করতে সমস্যা: {e}")
+
+    tab_names = st.session_state.get("tab_names", [])
+    if tab_names:
+        selected_tab = st.selectbox("ড্যাশবোর্ডের ট্যাব সিলেক্ট করুন:", tab_names)
+        if selected_tab:
+            try:
+                _, spreadsheet = get_google_services()
+                ws = spreadsheet.worksheet(selected_tab)
+                all_values = ws.get_all_values()
+
+                if all_values:
+                    df_view = pd.DataFrame(all_values)
+                    st.dataframe(df_view, use_container_width=True)
+                else:
+                    st.info("এই ট্যাবে কোনো ডাটা নেই।")
+            except Exception as e:
+                st.error(f"❌ ডাটা প্রদর্শন করতে সমস্যা: {e}")
+
+# Tab 4: AI Data Assistant Chatbot
+with tab_chat:
+    st.subheader("💬 AI Data Assistant")
+    st.caption("আপনার ড্যাশবোর্ড ও মাস্টার গুগল শিটের ডাটা নিয়ে কথা বলুন বা খুঁজুন।")
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {
+                "role": "assistant",
+                "content": "হ্যালো! আমি আপনার ড্যাশবোর্ড AI অ্যাসিস্ট্যান্ট। আপনি মাস্টার শিটের ডাটা সম্পর্কিত যেকোনো প্রশ্ন জিজ্ঞাসা করতে পারেন (যেমন: 'মোট কতটি শিট আছে?', 'WS_1 ট্যাবের ডাটা সার্চ করো' ইত্যাদি)।",
+            }
+        ]
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("এখানে আপনার প্রশ্ন লিখুন..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("গুগল শিটের ডাটা স্ক্যান করা হচ্ছে..."):
+                try:
+                    _, spreadsheet = get_google_services()
+                    worksheets = spreadsheet.worksheets()
+                    sheet_titles = [ws.title for ws in worksheets]
+
+                    query = prompt.lower()
+                    matched_tab = None
+                    for t in sheet_titles:
+                        if t.lower() in query:
+                            matched_tab = t
+                            break
+
+                    if matched_tab:
+                        ws = spreadsheet.worksheet(matched_tab)
+                        vals = ws.get_all_values()
+                        total_rows = len(vals)
+                        response = f"📊 **ট্যাব সার্চ ফলাফল:**\n\nআপনি **'{matched_tab}'** ট্যাবটির কথা উল্লেখ করেছেন। এই ট্যাবে মোট **{total_rows}** টি রো (Row) ডাটা পাওয়া গেছে।\n\nপ্রথম ৫টি রো-এর নমুনা:\n"
+                        sample_df = pd.DataFrame(vals[:6])
+                        st.markdown(response)
+                        st.dataframe(sample_df, use_container_width=True)
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": response}
+                        )
+                    else:
+                        response = f"🔍 **ড্যাশবোর্ড সামারি:**\n\nবর্তমানে আপনার মাস্টার ড্যাশবোর্ডে মোট **{len(sheet_titles)}টি** সক্রিয় শিট/ট্যাব রয়েছে।\n\n**উপলব্ধ ট্যাবসমূহ:**\n`" + "`, `" .join(sheet_titles[:15]) + "`"
+                        if len(sheet_titles) > 15:
+                            response += f" এবং আরও {len(sheet_titles) - 15}টি।"
+                        response += "\n\n💡 *টিপস:* যেকোনো নির্দিষ্ট ট্যাবের ডাটা দেখতে প্রশ্নে ট্যাবের নাম উল্লেখ করুন (যেমন: `WS_1_S15` বা `Rejection_1`)।"
+                        st.markdown(response)
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": response}
+                        )
+
+                except Exception as e:
+                    err_msg = f"❌ ডাটা বিশ্লেষণে সমস্যা হয়েছে: {e}"
+                    st.markdown(err_msg)
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": err_msg}
+                    )
