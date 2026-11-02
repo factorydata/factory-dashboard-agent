@@ -9,14 +9,14 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 # --------------------------------------------------
-# Page Config & Custom Styling (ChatGPT Theme)
+# Page Config & Custom Styling
 # --------------------------------------------------
 st.set_page_config(
     page_title="Factory Dashboard AI Agent", page_icon="🤖", layout="wide"
 )
 
 # --------------------------------------------------
-# 1. Authentication System (10 Users)
+# 1. Authentication System
 # --------------------------------------------------
 USER_CREDENTIALS = {
     "admin": "admin123",
@@ -220,7 +220,6 @@ with tab_sync:
                                     else f"{item['prefix']}_{file_index}_S{s_idx}"
                                 )
 
-                                # NaN এবং Float রূপান্তরজনিত ত্রুটি প্রতিরোধে:
                                 df = df.astype(object).fillna("")
                                 values = [df.columns.astype(str).tolist()] + df.astype(
                                     str
@@ -248,13 +247,14 @@ with tab_sync:
 
                         file_index += 1
 
+                    # ফাইল ট্র্যাশ করার লজিক (পারমিশন না থাকলে ইগনোর করবে)
                     for pid in processed_ids:
                         try:
                             drive_service.files().update(
                                 fileId=pid, body={"trashed": True}
                             ).execute()
-                        except Exception as clean_err:
-                            st.warning(f"Trashing failed for {pid}: {clean_err}")
+                        except Exception:
+                            pass  # Trashing error ইগনোর করা হলো
 
                 status_text.text("Sync complete!")
                 st.success(
