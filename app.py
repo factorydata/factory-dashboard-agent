@@ -314,7 +314,7 @@ with tab_upload:
         except Exception as e:
             st.error(f"❌ আপলোডে সমস্যা হয়েছে: {e}")
 
-# Tab 3: Data Viewer
+# Tab 3: Data Viewer (Direct Grid View Without Column Conflicts)
 with tab_view:
     st.subheader("মাস্টার ড্যাশবোর্ড ডাটা ভিউয়ার")
     if st.button("🔄 Refresh Tabs List"):
@@ -335,9 +335,7 @@ with tab_view:
                 all_values = ws.get_all_values()
 
                 if all_values:
-                    header = all_values[0]
-                    rows = all_values[1:]
-                    df_view = pd.DataFrame(rows, columns=header)
+                    df_view = pd.DataFrame(all_values)
                     st.dataframe(df_view, use_container_width=True)
                 else:
                     st.info("এই ট্যাবে কোনো ডাটা নেই।")
