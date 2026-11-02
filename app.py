@@ -59,13 +59,11 @@ def get_ai_client():
     return genai.Client(api_key=api_key) if api_key else None
 
 def search_files_in_drive(drive_service, query_text):
-    """গুগল ড্রাইভের সব ফোল্ডার ও সাবফোল্ডারে নাম ধরে ফাইল খোঁজা"""
     query = f"mimeType != 'application/vnd.google-apps.folder' and trashed = false and name contains '{query_text}'"
     results = drive_service.files().list(q=query, fields="files(id, name, createdTime)").execute()
     return results.get("files", [])
 
 def read_excel_from_drive(drive_service, file_id):
-    """গুগল ড্রাইভ থেকে এক্সেল বা সিএসভি পড়ে টেক্সট আকারে রূপান্তর করা"""
     request = drive_service.files().get_media(fileId=file_id)
     fstream = io.BytesIO()
     downloader = MediaIoBaseDownload(fstream, request)
@@ -117,7 +115,6 @@ if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..
                     st.error("❌ Gemini API Key পাওয়া যায়নি! Streamlit Secrets-এ GEMINI_API_KEY সেট করুন।")
                     st.stop()
 
-                # Keywords বের করা
                 keywords = [w for w in prompt.split() if len(w) > 2]
                 found_files = []
                 
@@ -128,7 +125,6 @@ if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..
                             found_files.append(f)
 
                 if not found_files:
-                    # যদি নির্দিষ্ট ফাইল না পায়, ড্রাইভে থাকা রিসেন্ট ফাইল স্ক্যান
                     results = drive_service.files().list(
                         q="mimeType != 'application/vnd.google-apps.folder' and trashed = false",
                         pageSize=5,
@@ -138,10 +134,10 @@ if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..
 
                 context_data = ""
                 scanned_names = []
-                for f in found_files[:3]:  # প্রথম ৩টি প্রাসঙ্গিক ফাইল লোড
+                for f in found_files[:3]:
                     scanned_names.append(f["name"])
                     content = read_excel_from_drive(drive_service, f["id"])
-                    context_data += f"\n\n=== File: {f['name']} ===\n{content[:15000]}" # Truncated safety
+                    context_data += f"\n\n=== File: {f['name']} ===\n{content[:15000]}"
 
                 system_prompt = f"""
                 You are an expert Factory Data Analyst. Answer the user's query in Bengali accurately based strictly on the provided file data context below.
@@ -152,8 +148,9 @@ if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..
                 {context_data}
                 """
 
+                # Updated Model Name
                 response = ai_client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.8-flash",
                     contents=system_prompt,
                 )
 
@@ -164,4 +161,4 @@ if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..
             except Exception as e:
                 err = f"❌ সমস্যা হয়েছে: {e}"
                 st.markdown(err)
-                st.session_state.messages.append({"role": "assistant", "content": err})
+                st.session_state.messages.append({"role": "assistant", "content": err
