@@ -347,7 +347,7 @@ with tab_view:
             except Exception as e:
                 st.error(f"❌ ডাটা প্রদর্শন করতে সমস্যা: {e}")
 
-# Tab 4: AI Data Assistant Chatbot
+# Tab 4: AI Data Assistant Chatbot (Smart Search Upgrade)
 with tab_chat:
     st.subheader("💬 AI Data Assistant")
     st.caption("আপনার ড্যাশবোর্ড ও মাস্টার গুগল শিটের ডাটা নিয়ে কথা বলুন বা খুঁজুন।")
@@ -356,7 +356,7 @@ with tab_chat:
         st.session_state.messages = [
             {
                 "role": "assistant",
-                "content": "হ্যালো! আমি আপনার ড্যাশবোর্ড AI অ্যাসিস্ট্যান্ট। আপনি মাস্টার শিটের ডাটা সম্পর্কিত যেকোনো প্রশ্ন জিজ্ঞাসা করতে পারেন (যেমন: 'মোট কতটি শিট আছে?', 'WS_1 ট্যাবের ডাটা সার্চ করো' ইত্যাদি)।",
+                "content": "হ্যালো! আমি আপনার ড্যাশবোর্ড AI অ্যাসিস্ট্যান্ট। আপনি কোনো রিপোর্টের নাম (যেমন: DMS, Rejection, WS) বা নির্দিষ্ট ট্যাবের নাম লিখে সার্চ করতে পারেন।",
             }
         ]
 
@@ -364,7 +364,7 @@ with tab_chat:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("এখানে আপনার প্রশ্ন লিখুন..."):
+    if prompt := st.chat_input("এখানে লিখুন (যেমন: DMS report, WS summary)..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -376,29 +376,38 @@ with tab_chat:
                     worksheets = spreadsheet.worksheets()
                     sheet_titles = [ws.title for ws in worksheets]
 
-                    query = prompt.lower()
-                    matched_tab = None
-                    for t in sheet_titles:
-                        if t.lower() in query:
-                            matched_tab = t
-                            break
+                    raw_words = prompt.lower().strip().split()
+                    matched_tabs = []
 
-                    if matched_tab:
-                        ws = spreadsheet.worksheet(matched_tab)
+                    # কিওয়ার্ড দিয়ে ম্যাচ করানো (উদা: 'dms', 'ws', 'rejection')
+                    for title in sheet_titles:
+                        t_lower = title.lower()
+                        for w in raw_words:
+                            if len(w) > 1 and w in t_lower:
+                                if title not in matched_tabs:
+                                    matched_tabs.append(title)
+
+                    if matched_tabs:
+                        target_tab = matched_tabs[0]
+                        ws = spreadsheet.worksheet(target_tab)
                         vals = ws.get_all_values()
                         total_rows = len(vals)
-                        response = f"📊 **ট্যাব সার্চ ফলাফল:**\n\nআপনি **'{matched_tab}'** ট্যাবটির কথা উল্লেখ করেছেন। এই ট্যাবে মোট **{total_rows}** টি রো (Row) ডাটা পাওয়া গেছে।\n\nপ্রথম ৫টি রো-এর নমুনা:\n"
-                        sample_df = pd.DataFrame(vals[:6])
-                        st.markdown(response)
-                        st.dataframe(sample_df, use_container_width=True)
+
+                        msg = f"📊 **নথি ও ডাটা পাওয়া গেছে!**\n\nআপনার অনুসন্ধানের সাথে সম্পর্কিত **'{target_tab}'** ট্যাবটি চিহ্নিত করা হয়েছে (মোট **{total_rows}** টি সারি পাওয়া গেছে)।"
+                        if len(matched_tabs) > 1:
+                            msg += f"\n\n*অন্যান্য সম্পর্কিত ট্যাব:* `{', '.join(matched_tabs[1:])}`"
+
+                        st.markdown(msg)
+                        if vals:
+                            st.dataframe(pd.DataFrame(vals[:8]), use_container_width=True)
+
                         st.session_state.messages.append(
-                            {"role": "assistant", "content": response}
+                            {"role": "assistant", "content": msg}
                         )
                     else:
                         response = f"🔍 **ড্যাশবোর্ড সামারি:**\n\nবর্তমানে আপনার মাস্টার ড্যাশবোর্ডে মোট **{len(sheet_titles)}টি** সক্রিয় শিট/ট্যাব রয়েছে।\n\n**উপলব্ধ ট্যাবসমূহ:**\n`" + "`, `" .join(sheet_titles[:15]) + "`"
                         if len(sheet_titles) > 15:
                             response += f" এবং আরও {len(sheet_titles) - 15}টি।"
-                        response += "\n\n💡 *টিপস:* যেকোনো নির্দিষ্ট ট্যাবের ডাটা দেখতে প্রশ্নে ট্যাবের নাম উল্লেখ করুন (যেমন: `WS_1_S15` বা `Rejection_1`)।"
                         st.markdown(response)
                         st.session_state.messages.append(
                             {"role": "assistant", "content": response}
