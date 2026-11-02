@@ -1,412 +1,167 @@
 import io
 import os
-import time
 import warnings
-import gspread
 import pandas as pd
 import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from google import genai
 
-# Deprecation warnings সাপ্রেস করার জন্য
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
-
-# --------------------------------------------------
-# Page Config
-# --------------------------------------------------
-st.set_page_config(
-    page_title="Factory Dashboard AI Agent", page_icon="🤖", layout="wide"
-)
+warnings.filterwarnings("ignore")
 
 # --------------------------------------------------
-# 1. Authentication System
+# 1. Page Config & Login
 # --------------------------------------------------
-USER_CREDENTIALS = {
-    "admin": "admin123",
-    "user1": "pass123",
-    "user2": "pass123",
-    "user3": "pass123",
-    "user4": "pass123",
-    "user5": "pass123",
-    "user6": "pass123",
-    "user7": "pass123",
-    "user8": "pass123",
-    "user9": "pass123",
-}
+st.set_page_config(page_title="Factory AI Assistant", page_icon="🤖", layout="wide")
 
+USER_CREDENTIALS = {"admin": "admin123", "user1": "pass123"}
 
-def login_screen():
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
     st.title("🤖 Factory Dashboard Agent - Login")
-    st.subheader("অনুগ্রহ করে আপনার অ্যাকাউন্ট বিবরণ দিয়ে প্রবেশ করুন")
-
     with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Log In")
-
-        if submit:
-            if (
-                username in USER_CREDENTIALS
-                and USER_CREDENTIALS[username] == password
-            ):
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        if st.form_submit_button("Log In"):
+            if u in USER_CREDENTIALS and USER_CREDENTIALS[u] == p:
                 st.session_state["authenticated"] = True
-                st.session_state["username"] = username
-                st.success("লগইন সফল হয়েছে!")
+                st.session_state["username"] = u
                 st.rerun()
             else:
                 st.error("ভুল ইউজারনাম অথবা পাসওয়ার্ড!")
-
-
-if not st.session_state.get("authenticated", False):
-    login_screen()
     st.stop()
 
-# --------------------------------------------------
-# 2. Google API Connections (From Secrets)
-# --------------------------------------------------
-SHEET_NAME = "Master Daily Dashboard"
-ROOT_FOLDER = "Daily mail"
-SCOPES = [
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/spreadsheets",
-]
-
-
-@st.cache_resource
-def get_google_services():
-    creds_dict = dict(st.secrets["gcp_service_account"])
-
-    if "private_key" in creds_dict:
-        pk = creds_dict["private_key"]
-        if "\\n" in pk:
-            pk = pk.replace("\\n", "\n")
-        creds_dict["private_key"] = pk
-
-    creds = service_account.Credentials.from_service_account_info(
-        creds_dict, scopes=SCOPES
-    )
-
-    drive_service = build("drive", "v3", credentials=creds)
-    gc = gspread.authorize(creds)
-    spreadsheet = gc.open(SHEET_NAME)
-    return drive_service, spreadsheet
-
-
-folder_mappings = [
-    {"prefix": "WS", "folder_name": "WS Reports"},
-    {"prefix": "Rejection", "folder_name": "Rejection Mail"},
-    {"prefix": "DMS", "folder_name": "DMS Report"},
-    {"prefix": "QAD", "folder_name": "QAD Reports"},
-    {"prefix": "Finishing_U1", "folder_name": "Finishing Mail U1"},
-    {"prefix": "Finishing_U2", "folder_name": "Finishing Mail U2"},
-    {"prefix": "Habibur", "folder_name": "Habibur Reports"},
-    {"prefix": "Ruhul", "folder_name": "Ruhul Amin Reports"},
-    {"prefix": "NPT", "folder_name": "Non Productive Time"},
-    {"prefix": "Alamgir", "folder_name": "Alamgir Reports"},
-    {"prefix": "Habibur_R", "folder_name": "Habibur Rahman Reports"},
-    {"prefix": "Nayem", "folder_name": "Nayem Mia Reports"},
-]
-
-
-def get_folder_id(drive_service, folder_name, parent_id=None):
-    query = (
-        "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    )
-    if parent_id:
-        query += f" and '{parent_id}' in parents"
-
-    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-    items = results.get("files", [])
-
-    for item in items:
-        if item["name"].strip().lower() == folder_name.strip().lower():
-            return item["id"]
-    return None
-
-
-# --------------------------------------------------
-# 3. Streamlit Sidebar & Header
-# --------------------------------------------------
 st.sidebar.title(f"👤 {st.session_state['username']}")
 if st.sidebar.button("Log Out"):
     st.session_state["authenticated"] = False
     st.rerun()
 
-st.title("🤖 Factory Dashboard Agent")
-st.caption(
-    "Google Drive এর ১২টি ফোল্ডারের ফাইল এবং ম্যানুয়াল ডাটা সিঙ্কিং পোর্টাল"
-)
+# --------------------------------------------------
+# 2. Google Drive & Gemini AI Setup
+# --------------------------------------------------
+ROOT_FOLDER = "Daily mail"
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
-st.markdown("---")
+@st.cache_resource
+def get_drive_service():
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    if "private_key" in creds_dict and "\\n" in creds_dict["private_key"]:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    return build("drive", "v3", credentials=creds)
+
+@st.cache_resource
+def get_ai_client():
+    api_key = st.secrets.get("GEMINI_API_KEY")
+    return genai.Client(api_key=api_key) if api_key else None
+
+def search_files_in_drive(drive_service, query_text):
+    """গুগল ড্রাইভের সব ফোল্ডার ও সাবফোল্ডারে নাম ধরে ফাইল খোঁজা"""
+    query = f"mimeType != 'application/vnd.google-apps.folder' and trashed = false and name contains '{query_text}'"
+    results = drive_service.files().list(q=query, fields="files(id, name, createdTime)").execute()
+    return results.get("files", [])
+
+def read_excel_from_drive(drive_service, file_id):
+    """গুগল ড্রাইভ থেকে এক্সেল বা সিএসভি পড়ে টেক্সট আকারে রূপান্তর করা"""
+    request = drive_service.files().get_media(fileId=file_id)
+    fstream = io.BytesIO()
+    downloader = MediaIoBaseDownload(fstream, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    fstream.seek(0)
+    
+    try:
+        excel_file = pd.ExcelFile(fstream, engine="openpyxl")
+        summary_text = ""
+        for sheet in excel_file.sheet_names:
+            df = pd.read_excel(excel_file, sheet_name=sheet).fillna("")
+            summary_text += f"\n--- Sheet: {sheet} ---\n"
+            summary_text += df.to_string(index=False)
+        return summary_text
+    except Exception:
+        fstream.seek(0)
+        df = pd.read_csv(fstream).fillna("")
+        return df.to_string(index=False)
 
 # --------------------------------------------------
-# 4. Action Tabs Navigation
+# 3. AI Assistant Main Interface
 # --------------------------------------------------
-tab_sync, tab_upload, tab_view, tab_chat = st.tabs(
-    [
-        "🔄 Auto Drive Sync",
-        "📤 Manual File Upload",
-        "📊 View Dashboard",
-        "💬 AI Assistant",
+st.title("🤖 Direct AI Factory Data Assistant")
+st.caption("ড্রাইভের ফাইল বা মেইলের ডাটা নিয়ে সরাসরি প্রশ্ন করুন (যেমন: 'DMS রিপোর্ট অনুযায়ী JKL-U2-1 এর ironman কতজন?')")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "হ্যালো! ড্রাইভে থাকা যেকোনো ফাইল/রিপোর্ট সম্পর্কিত প্রশ্ন লিখুন, আমি ফাইল স্ক্যান করে নিখুঁত উত্তর দিচ্ছি।"}
     ]
-)
 
-# Tab 1: Fast Google Drive Sync
-with tab_sync:
-    st.subheader("ড্রাইভ ফাইল প্রসেসিং")
-    st.write("Google Drive-এর ১২টি ফোল্ডার স্ক্যান করে ড্যাশবোর্ডে সিঙ্ক করুন।")
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-    if st.button("🚀 Start Drive Sync", type="primary"):
-        try:
-            drive_service, spreadsheet = get_google_services()
-            main_folder_id = get_folder_id(drive_service, ROOT_FOLDER)
+if prompt := st.chat_input("আপনার প্রশ্ন লিখুন..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-            if not main_folder_id:
-                st.error(f"❌ Drive-এ '{ROOT_FOLDER}' ফোল্ডারটি পাওয়া যায়নি!")
-            else:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+    with st.chat_message("assistant"):
+        with st.spinner("গুগল ড্রাইভ থেকে প্রাসঙ্গিক ফাইল পড়া ও AI বিশ্লেষণ চলছে..."):
+            try:
+                drive_service = get_drive_service()
+                ai_client = get_ai_client()
 
-                total_folders = len(folder_mappings)
-                total_files_processed = 0
-                updated_tabs_count = 0
+                if not ai_client:
+                    st.error("❌ Gemini API Key পাওয়া যায়নি! Streamlit Secrets-এ GEMINI_API_KEY সেট করুন।")
+                    st.stop()
 
-                for idx, item in enumerate(folder_mappings):
-                    status_text.text(f"Scanning folder: {item['folder_name']}...")
-                    progress_bar.progress((idx + 1) / total_folders)
+                # Keywords বের করা
+                keywords = [w for w in prompt.split() if len(w) > 2]
+                found_files = []
+                
+                for kw in keywords:
+                    files = search_files_in_drive(drive_service, kw)
+                    for f in files:
+                        if f not in found_files:
+                            found_files.append(f)
 
-                    sub_folder_id = get_folder_id(
-                        drive_service, item["folder_name"], parent_id=main_folder_id
-                    )
-                    if not sub_folder_id:
-                        continue
+                if not found_files:
+                    # যদি নির্দিষ্ট ফাইল না পায়, ড্রাইভে থাকা রিসেন্ট ফাইল স্ক্যান
+                    results = drive_service.files().list(
+                        q="mimeType != 'application/vnd.google-apps.folder' and trashed = false",
+                        pageSize=5,
+                        fields="files(id, name)"
+                    ).execute()
+                    found_files = results.get("files", [])
 
-                    files_list = (
-                        drive_service.files()
-                        .list(
-                            q=f"'{sub_folder_id}' in parents and trashed = false",
-                            fields="files(id, name)",
-                        )
-                        .execute()
-                        .get("files", [])
-                    )
+                context_data = ""
+                scanned_names = []
+                for f in found_files[:3]:  # প্রথম ৩টি প্রাসঙ্গিক ফাইল লোড
+                    scanned_names.append(f["name"])
+                    content = read_excel_from_drive(drive_service, f["id"])
+                    context_data += f"\n\n=== File: {f['name']} ===\n{content[:15000]}" # Truncated safety
 
-                    file_index = 1
-                    processed_ids = []
+                system_prompt = f"""
+                You are an expert Factory Data Analyst. Answer the user's query in Bengali accurately based strictly on the provided file data context below.
+                
+                User Query: {prompt}
+                
+                Scanned Files Context:
+                {context_data}
+                """
 
-                    for f in files_list:
-                        fname, fid = f["name"], f["id"]
-                        if not (
-                            fname.endswith(".xlsx")
-                            or fname.endswith(".xls")
-                            or fname.endswith(".csv")
-                        ):
-                            continue
-
-                        try:
-                            request = drive_service.files().get_media(fileId=fid)
-                            fstream = io.BytesIO()
-                            downloader = MediaIoBaseDownload(fstream, request)
-                            done = False
-                            while not done:
-                                _, done = downloader.next_chunk()
-                            fstream.seek(0)
-
-                            if fname.endswith(".csv"):
-                                sheets_dict = {"Sheet1": pd.read_csv(fstream)}
-                            else:
-                                excel_file = pd.ExcelFile(fstream, engine="openpyxl")
-                                sheets_dict = {
-                                    sheet: pd.read_excel(excel_file, sheet_name=sheet)
-                                    for sheet in excel_file.sheet_names
-                                }
-
-                            sheet_count = len(sheets_dict)
-
-                            for s_idx, (s_name, df) in enumerate(
-                                sheets_dict.items(), start=1
-                            ):
-                                target_tab_name = (
-                                    f"{item['prefix']}_{file_index}"
-                                    if sheet_count == 1
-                                    else f"{item['prefix']}_{file_index}_S{s_idx}"
-                                )
-
-                                df = df.astype(object).fillna("")
-                                values = [df.columns.astype(str).tolist()] + df.astype(
-                                    str
-                                ).values.tolist()
-
-                                try:
-                                    worksheet = spreadsheet.worksheet(target_tab_name)
-                                except gspread.exceptions.WorksheetNotFound:
-                                    worksheet = spreadsheet.add_worksheet(
-                                        title=target_tab_name,
-                                        rows=max(len(values) + 20, 100),
-                                        cols=max(len(values[0]) + 10, 20),
-                                    )
-
-                                worksheet.clear()
-                                worksheet.update(values=values, range_name="A1")
-                                updated_tabs_count += 1
-
-                            processed_ids.append(fid)
-                            total_files_processed += 1
-
-                        except Exception as err:
-                            st.warning(f"Error processing {fname}: {err}")
-
-                        file_index += 1
-
-                    for pid in processed_ids:
-                        try:
-                            drive_service.files().update(
-                                fileId=pid, body={"trashed": True}
-                            ).execute()
-                        except Exception:
-                            pass
-
-                status_text.text("Sync complete!")
-                st.success(
-                    f"✅ **Sync Successful!** Processed {total_files_processed} files"
-                    f" and updated {updated_tabs_count} tabs."
+                response = ai_client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=system_prompt,
                 )
 
-        except Exception as e:
-            st.error(f"❌ Error during sync: {e}")
+                final_answer = f"📄 **স্ক্যান করা ফাইলসমূহ:** `{', '.join(scanned_names)}` \n\n" + response.text
+                st.markdown(final_answer)
+                st.session_state.messages.append({"role": "assistant", "content": final_answer})
 
-# Tab 2: Manual Excel/CSV Upload
-with tab_upload:
-    st.subheader("ম্যানুয়াল এক্সেল/সিএসভি আপলোড")
-    uploaded_file = st.file_uploader(
-        "এক্সেল অথবা সিএসভি ফাইল সিলেক্ট বা ড্র্যাগ করুন",
-        type=["xlsx", "xls", "csv"],
-    )
-    custom_prefix = st.text_input("ট্যাব প্রিফিক্স (Prefix Name)", value="MANUAL")
-
-    if uploaded_file and st.button("📤 Upload & Sync to Sheet"):
-        try:
-            _, spreadsheet = get_google_services()
-            if uploaded_file.name.endswith(".csv"):
-                df = pd.read_csv(uploaded_file)
-                sheets_dict = {"Sheet1": df}
-            else:
-                excel_file = pd.ExcelFile(uploaded_file, engine="openpyxl")
-                sheets_dict = {
-                    sheet: pd.read_excel(excel_file, sheet_name=sheet)
-                    for sheet in excel_file.sheet_names
-                }
-
-            for s_name, df in sheets_dict.items():
-                tab_title = f"{custom_prefix}_{s_name}"
-                df = df.astype(object).fillna("")
-                values = [df.columns.astype(str).tolist()] + df.astype(
-                    str
-                ).values.tolist()
-
-                try:
-                    worksheet = spreadsheet.worksheet(tab_title)
-                except gspread.exceptions.WorksheetNotFound:
-                    worksheet = spreadsheet.add_worksheet(
-                        title=tab_title,
-                        rows=max(len(values) + 20, 100),
-                        cols=max(len(values[0]) + 10, 20),
-                    )
-
-                worksheet.clear()
-                worksheet.update(values=values, range_name="A1")
-
-            st.success(f"✅ '{uploaded_file.name}' সফলভাবে মাস্টার শিটে আপলোড হয়েছে!")
-        except Exception as e:
-            st.error(f"❌ আপলোডে সমস্যা হয়েছে: {e}")
-
-# Tab 3: Data Viewer
-with tab_view:
-    st.subheader("মাস্টার ড্যাশবোর্ড ডাটা ভিউয়ার")
-    if st.button("🔄 Refresh Tabs List"):
-        try:
-            _, spreadsheet = get_google_services()
-            worksheets = spreadsheet.worksheets()
-            st.session_state["tab_names"] = [ws.title for ws in worksheets]
-        except Exception as e:
-            st.error(f"❌ ট্যাব লিস্ট লোড করতে সমস্যা: {e}")
-
-    tab_names = st.session_state.get("tab_names", [])
-    if tab_names:
-        selected_tab = st.selectbox("ড্যাশবোর্ডের ট্যাব সিলেক্ট করুন:", tab_names)
-        if selected_tab:
-            try:
-                _, spreadsheet = get_google_services()
-                ws = spreadsheet.worksheet(selected_tab)
-                all_values = ws.get_all_values()
-
-                if all_values:
-                    df_view = pd.DataFrame(all_values)
-                    st.dataframe(df_view, use_container_width="stretch")
-                else:
-                    st.info("এই ট্যাবে কোনো ডাটা নেই।")
             except Exception as e:
-                st.error(f"❌ ডাটা প্রদর্শন করতে সমস্যা: {e}")
-
-# Tab 4: AI Data Assistant Chatbot
-with tab_chat:
-    st.subheader("💬 AI Data Assistant")
-    st.caption("আপনার ড্যাশবোর্ড ও মাস্টার গুগল শিটের ডাটা নিয়ে কথা বলুন বা খুঁজুন।")
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {
-                "role": "assistant",
-                "content": "হ্যালো! আমি আপনার ড্যাশবোর্ড AI অ্যাসিস্ট্যান্ট। আপনি যেকোনো রিপোর্টের নাম (যেমন: DMS, Rejection, WS) বা ট্যাবের নাম লিখে সার্চ করতে পারেন।",
-            }
-        ]
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if prompt := st.chat_input("এখানে লিখুন (যেমন: DMS report, WS summary)..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            with st.spinner("গুগল শিটের ডাটা স্ক্যান করা হচ্ছে..."):
-                try:
-                    _, spreadsheet = get_google_services()
-                    worksheets = spreadsheet.worksheets()
-                    sheet_titles = [ws.title for ws in worksheets]
-
-                    raw_words = prompt.lower().strip().split()
-                    matched_tabs = []
-
-                    for title in sheet_titles:
-                        t_lower = title.lower()
-                        for w in raw_words:
-                            if len(w) > 1 and w in t_lower:
-                                if title not in matched_tabs:
-                                    matched_tabs.append(title)
-
-                    if matched_tabs:
-                        target_tab = matched_tabs[0]
-                        ws = spreadsheet.worksheet(target_tab)
-                        vals = ws.get_all_values()
-                        total_rows = len(vals)
-
-                        msg = f"📊 **নথি ও ডাটা পাওয়া গেছে!**\n\nআপনার অনুসন্ধানের সাথে সম্পর্কিত **'{target_tab}'** ট্যাবটি চিহ্নিত করা হয়েছে (মোট **{total_rows}** টি সারি পাওয়া গেছে)।"
-                        if len(matched_tabs) > 1:
-                            msg += f"\n\n*অন্যান্য সম্পর্কিত ট্যাব:* `{', '.join(matched_tabs[1:])}`"
-
-                        st.markdown(msg)
-                        if vals:
-                            st.dataframe(pd.DataFrame(vals[:8]), use_container_width="stretch")
-
-                        st.session_state.messages.append(
-                            {"role": "assistant", "content": msg}
-                        )
-                    else:
-                        response = f"🔍 **ড্যাশবোর্ড সামারি:**\n\nবর্তমানে আপনার মাস্টার ড্যাশবোর্ডে মোট **{len(sheet_titles)}টি** সক্রিয় শিট/ট্যাব রয়েছে।\n\n**উপলব্ধ ট্যাবসমূহ:**\n`" + "`, `" .join(sheet_titles[:15]) + "`"
-                        if len(sheet_titles) > 15:
-                            response += f" এবং আরও {len(
+                err = f"❌ সমস্যা হয়েছে: {e}"
+                st.markdown(err)
+                st.session_state.messages.append({"role": "assistant", "content": err})
