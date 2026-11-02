@@ -1,12 +1,12 @@
 import io
 import os
 import time
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 import gspread
 import pandas as pd
 import streamlit as st
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 # --------------------------------------------------
 # Page Config & Custom Styling (ChatGPT Theme)
@@ -33,52 +33,56 @@ USER_CREDENTIALS = {
 
 
 def login_screen():
-  st.title("🤖 Factory Dashboard Agent - Login")
-  st.subheader("অনুগ্রহ করে আপনার অ্যাকাউন্ট বিবরণ দিয়ে প্রবেশ করুন")
+    st.title("🤖 Factory Dashboard Agent - Login")
+    st.subheader("অনুগ্রহ করে আপনার অ্যাকাউন্ট বিবরণ দিয়ে প্রবেশ করুন")
 
-  with st.form("login_form"):
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    submit = st.form_submit_button("Log In")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Log In")
 
-    if submit:
-      if (
-          username in USER_CREDENTIALS
-          and USER_CREDENTIALS[username] == password
-      ):
-        st.session_state["authenticated"] = True
-        st.session_state["username"] = username
-        st.success("লগইন সফল হয়েছে!")
-        st.rerun()
-      else:
-        st.error("ভুল ইউজারনাম অথবা পাসওয়ার্ড!")
+        if submit:
+            if (
+                username in USER_CREDENTIALS
+                and USER_CREDENTIALS[username] == password
+            ):
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = username
+                st.success("লগইন সফল হয়েছে!")
+                st.rerun()
+            else:
+                st.error("ভুল ইউজারনাম অথবা পাসওয়ার্ড!")
 
 
 if not st.session_state.get("authenticated", False):
-  login_screen()
-  st.stop()
+    login_screen()
+    st.stop()
 
 # --------------------------------------------------
-# 2. Google API Connections
+# 2. Google API Connections (From Secrets)
 # --------------------------------------------------
 SHEET_NAME = "Master Daily Dashboard"
 ROOT_FOLDER = "Daily mail"
-SERVICE_ACCOUNT_FILE = "credentials.json"
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
-
 @st.cache_resource
 def get_google_services():
-  creds = Credentials.from_service_account_file(
-      SERVICE_ACCOUNT_FILE, scopes=SCOPES
-  )
-  drive_service = build("drive", "v3", credentials=creds)
-  gc = gspread.authorize(creds)
-  spreadsheet = gc.open(SHEET_NAME)
-  return drive_service, spreadsheet
+    # Streamlit Secrets থেকে credentials পড়া এবং \n ঠিক করা
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    if "private_key" in creds_dict:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=SCOPES
+    )
+    
+    drive_service = build("drive", "v3", credentials=creds)
+    gc = gspread.authorize(creds)
+    spreadsheet = gc.open(SHEET_NAME)
+    return drive_service, spreadsheet
 
 
 folder_mappings = [
@@ -98,15 +102,15 @@ folder_mappings = [
 
 
 def get_folder_id(drive_service, folder_name, parent_id=None):
-  query = (
-      f"name = '{folder_name}' and mimeType ="
-      " 'application/vnd.google-apps.folder' and trashed = false"
-  )
-  if parent_id:
-    query += f" and '{parent_id}' in parents"
-  results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-  items = results.get("files", [])
-  return items[0]["id"] if items else None
+    query = (
+        f"name = '{folder_name}' and mimeType ="
+        " 'application/vnd.google-apps.folder' and trashed = false"
+    )
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get("files", [])
+    return items[0]["id"] if items else None
 
 
 # --------------------------------------------------
@@ -114,12 +118,12 @@ def get_folder_id(drive_service, folder_name, parent_id=None):
 # --------------------------------------------------
 st.sidebar.title(f"👤 {st.session_state['username']}")
 if st.sidebar.button("Log Out"):
-  st.session_state["authenticated"] = False
-  st.rerun()
+    st.session_state["authenticated"] = False
+    st.rerun()
 
 st.title("🤖 Factory Dashboard Agent")
 st.caption(
-    "Google Drive এর ১২টি ফোল্ডারের ফাইল এবং ম্যানুয়াল ডাটা সিঙ্কিং পোর্টাল"
+    "Google Drive এর ১২টি ফোল্ডারের ফাইল এবং ম্যানুয়াল ডাটা সিঙ্কিং পোর্টাল"
 )
 
 st.markdown("---")
@@ -133,189 +137,84 @@ tab_sync, tab_upload, tab_view = st.tabs(
 
 # Tab 1: Google Drive Sync
 with tab_sync:
-  st.subheader("ড্রাইভ ফাইল প্রসেসিং")
-  st.write("Google Drive-এর ১২টি ফোল্ডার স্ক্যান করে ড্যাশবোর্ডে সিঙ্ক করুন।")
+    st.subheader("ড্রাইভ ফাইল প্রসেসিং")
+    st.write("Google Drive-এর ১২টি ফোল্ডার স্ক্যান করে ড্যাশবোর্ডে সিঙ্ক করুন।")
 
-  if st.button("🚀 Start Drive Sync", type="primary"):
-    try:
-      drive_service, spreadsheet = get_google_services()
-      main_folder_id = get_folder_id(drive_service, ROOT_FOLDER)
-
-      if not main_folder_id:
-        st.error(f"❌ Drive-এ '{ROOT_FOLDER}' ফোল্ডারটি পাওয়া যায়নি!")
-      else:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-
-        total_folders = len(folder_mappings)
-        total_files_processed = 0
-        updated_tabs_count = 0
-
-        for idx, item in enumerate(folder_mappings):
-          status_text.text(f"Scanning folder: {item['folder_name']}...")
-          progress_bar.progress((idx + 1) / total_folders)
-
-          sub_folder_id = get_folder_id(
-              drive_service, item["folder_name"], parent_id=main_folder_id
-          )
-          if not sub_folder_id:
-            continue
-
-          files_list = (
-              drive_service.files()
-              .list(
-                  q=f"'{sub_folder_id}' in parents and trashed = false",
-                  fields="files(id, name)",
-              )
-              .execute()
-              .get("files", [])
-          )
-
-          file_index = 1
-          processed_ids = []
-
-          for f in files_list:
-            fname, fid = f["name"], f["id"]
-            if not (
-                fname.endswith(".xlsx")
-                or fname.endswith(".xls")
-                or fname.endswith(".csv")
-            ):
-              continue
-
-            try:
-              request = drive_service.files().get_media(fileId=fid)
-              fstream = io.BytesIO()
-              downloader = MediaIoBaseDownload(fstream, request)
-              done = False
-              while not done:
-                _, done = downloader.next_chunk()
-              fstream.seek(0)
-
-              if fname.endswith(".csv"):
-                sheets_dict = {"Sheet1": pd.read_csv(fstream)}
-              else:
-                excel_file = pd.ExcelFile(fstream, engine="openpyxl")
-                sheets_dict = {
-                    sheet: excel_file.parse(sheet)
-                    for sheet in excel_file.sheet_names
-                }
-
-              sheet_count = len(sheets_dict)
-
-              for s_idx, (s_name, df) in enumerate(
-                  sheets_dict.items(), start=1
-              ):
-                target_tab_name = (
-                    f"{item['prefix']}_{file_index}"
-                    if sheet_count == 1
-                    else f"{item['prefix']}_{file_index}_S{s_idx}"
-                )
-
-                df = df.fillna("")
-                values = [df.columns.astype(str).tolist()] + df.astype(
-                    str
-                ).values.tolist()
-
-                try:
-                  worksheet = spreadsheet.worksheet(target_tab_name)
-                except gspread.exceptions.WorksheetNotFound:
-                  worksheet = spreadsheet.add_worksheet(
-                      title=target_tab_name,
-                      rows=max(len(values) + 20, 100),
-                      cols=max(len(values[0]) + 10, 20),
-                  )
-
-                worksheet.clear()
-                worksheet.update(values=values, range_name="A1")
-                updated_tabs_count += 1
-                time.sleep(1)  # Quota protection
-
-              processed_ids.append(fid)
-              total_files_processed += 1
-
-            except Exception as err:
-              st.warning(f"Error processing {fname}: {err}")
-
-            file_index += 1
-
-          for pid in processed_ids:
-            try:
-              drive_service.files().update(
-                  fileId=pid, body={"trashed": True}
-              ).execute()
-            except Exception as clean_err:
-              st.warning(f"Trashing failed for {pid}: {clean_err}")
-
-        status_text.text("Sync complete!")
-        st.success(
-            f"✅ **Sync Successful!** Processed {total_files_processed} files"
-            f" and updated {updated_tabs_count} tabs."
-        )
-
-    except Exception as e:
-      st.error(f"❌ Error during sync: {e}")
-
-# Tab 2: Manual Excel/CSV Upload
-with tab_upload:
-  st.subheader("ম্যানুয়াল এক্সেল/সিএসভি আপলোড")
-  uploaded_file = st.file_uploader(
-      "এক্সেল অথবা সিএসভি ফাইল সিলেক্ট বা ড্র্যাগ করুন",
-      type=["xlsx", "xls", "csv"],
-  )
-  custom_prefix = st.text_input("ট্যাব প্রিফিক্স (Prefix Name)", value="MANUAL")
-
-  if uploaded_file and st.button("📤 Upload & Sync to Sheet"):
-    try:
-      _, spreadsheet = get_google_services()
-      if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-        sheets_dict = {"Sheet1": df}
-      else:
-        excel_file = pd.ExcelFile(uploaded_file, engine="openpyxl")
-        sheets_dict = {
-            sheet: excel_file.parse(sheet) for sheet in excel_file.sheet_names
-        }
-
-      for s_name, df in sheets_dict.items():
-        tab_title = f"{custom_prefix}_{s_name}"
-        df = df.fillna("")
-        values = [df.columns.astype(str).tolist()] + df.astype(
-            str
-        ).values.tolist()
-
+    if st.button("🚀 Start Drive Sync", type="primary"):
         try:
-          worksheet = spreadsheet.worksheet(tab_title)
-        except gspread.exceptions.WorksheetNotFound:
-          worksheet = spreadsheet.add_worksheet(
-              title=tab_title,
-              rows=max(len(values) + 20, 100),
-              cols=max(len(values[0]) + 10, 20),
-          )
+            drive_service, spreadsheet = get_google_services()
+            main_folder_id = get_folder_id(drive_service, ROOT_FOLDER)
 
-        worksheet.clear()
-        worksheet.update(values=values, range_name="A1")
+            if not main_folder_id:
+                st.error(f"❌ Drive-এ '{ROOT_FOLDER}' ফোল্ডারটি পাওয়া যায়নি!")
+            else:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
 
-      st.success(f"✅ '{uploaded_file.name}' সফলভাবে মাস্টার শিটে আপলোড হয়েছে!")
-    except Exception as e:
-      st.error(f"❌ আপলোডে সমস্যা হয়েছে: {e}")
+                total_folders = len(folder_mappings)
+                total_files_processed = 0
+                updated_tabs_count = 0
 
-# Tab 3: Data Viewer
-with tab_view:
-  st.subheader("মাস্টার ড্যাশবোর্ড ডাটা ভিউয়ার")
-  if st.button("🔄 Refresh Tabs List"):
-    try:
-      _, spreadsheet = get_google_services()
-      worksheets = spreadsheet.worksheets()
-      tab_names = [ws.title for ws in worksheets]
+                for idx, item in enumerate(folder_mappings):
+                    status_text.text(f"Scanning folder: {item['folder_name']}...")
+                    progress_bar.progress((idx + 1) / total_folders)
 
-      selected_tab = st.selectbox("ড্যাশবোর্ডের ট্যাব সিলেক্ট করুন:", tab_names)
-      if selected_tab:
-        ws = spreadsheet.worksheet(selected_tab)
-        data = ws.get_all_records()
-        if data:
-          st.dataframe(pd.DataFrame(data), use_container_width=True)
-        else:
-          st.info("এই ট্যাবে কোনো ডাটা নেই।")
-    except Exception as e:
-      st.error(f"❌ ডাটা লোড করতে সমস্যা: {e}")
+                    sub_folder_id = get_folder_id(
+                        drive_service, item["folder_name"], parent_id=main_folder_id
+                    )
+                    if not sub_folder_id:
+                        continue
+
+                    files_list = (
+                        drive_service.files()
+                        .list(
+                            q=f"'{sub_folder_id}' in parents and trashed = false",
+                            fields="files(id, name)",
+                        )
+                        .execute()
+                        .get("files", [])
+                    )
+
+                    file_index = 1
+                    processed_ids = []
+
+                    for f in files_list:
+                        fname, fid = f["name"], f["id"]
+                        if not (
+                            fname.endswith(".xlsx")
+                            or fname.endswith(".xls")
+                            or fname.endswith(".csv")
+                        ):
+                            continue
+
+                        try:
+                            request = drive_service.files().get_media(fileId=fid)
+                            fstream = io.BytesIO()
+                            downloader = MediaIoBaseDownload(fstream, request)
+                            done = False
+                            while not done:
+                                _, done = downloader.next_chunk()
+                            fstream.seek(0)
+
+                            if fname.endswith(".csv"):
+                                sheets_dict = {"Sheet1": pd.read_csv(fstream)}
+                            else:
+                                excel_file = pd.ExcelFile(fstream, engine="openpyxl")
+                                sheets_dict = {
+                                    sheet: excel_file.parse(sheet)
+                                    for sheet in excel_file.sheet_names
+                                }
+
+                            sheet_count = len(sheets_dict)
+
+                            for s_idx, (s_name, df) in enumerate(
+                                sheets_dict.items(), start=1
+                            ):
+                                target_tab_name = (
+                                    f"{item['prefix']}_{file_index}"
+                                    if sheet_count == 1
+                                    else f"{item['prefix']}_{file_index}_S{s_idx}"
+                                )
+
+                                df = df.fillna("")
+                                values = [df.columns.astype(str).
